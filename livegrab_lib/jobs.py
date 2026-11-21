@@ -17,7 +17,6 @@ external grab.
 
 from __future__ import annotations
 
-import copy
 import json
 import ntpath
 import os
@@ -28,7 +27,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from livegrab_lib.command import build_args
@@ -255,7 +254,7 @@ def _external_candidates():
         # A failed Windows read must not block a grab. Detection is best-effort.
         try:
             yield from _windows_ytdlp_argvs()
-        except Exception:
+        except Exception: # noqa
             return
         return
     try:
@@ -274,12 +273,13 @@ def _external_candidates():
 def _windows_ytdlp_argvs():
     """Yield (pid, argv) for a running yt-dlp.exe. Does not signal it."""
     for pid, image in _windows_process_names():
+        argv = None
         if pid <= 0 or pid == os.getpid() or not _ytdlp_name(image):
             continue
         try:
             argv = _windows_command_argv(pid)
-        except Exception:
-            continue
+        except Exception: # noqa
+            sys.stderr.write("Problem with yt-dlp on Windows\n")
         if not argv:
             continue
         if not _is_ytdlp(argv):
@@ -658,7 +658,7 @@ def _blank_job() -> dict:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def public_job(job: dict) -> dict:
@@ -688,7 +688,7 @@ def public_job(job: dict) -> dict:
 
 
 class JobManager:
-    def __init__(self, path: str = JOBS_PATH):
+    def __init__(self, path: Path = JOBS_PATH):
         self.path = path
         self._lock = threading.Lock()
         self._jobs: list[dict] = []
@@ -1110,7 +1110,7 @@ def _windows_taskkill_tree(pid: int) -> None:
     kwargs["stderr"] = subprocess.DEVNULL
     kwargs["shell"] = False
     kwargs["check"] = False
-    subprocess.run(command, **kwargs)
+    subprocess.run(command, check=False, **kwargs)
 
 
 def _wait_pid_exit(pid: int, timeout: float, progress=None) -> bool:
@@ -1174,7 +1174,7 @@ def _call_progress(progress):
         return None
     try:
         return progress()
-    except Exception:
+    except Exception: # noqa
         return None
 
 
@@ -1319,7 +1319,7 @@ def _finalize_partial(job: dict) -> None:
         _finalize_partial_work(job)
     except OSError as exc:
         if not job.get("error"):
-            job["error"] = "Could not remux the partial recording: %s" % exc
+            job["error"] = f"Could not remux the partial recording: {exc}"
         if not _is_ready_mp4(job.get("output_path")):
             _remember_output(job)
 
@@ -1333,11 +1333,10 @@ def _finalize_partial_work(job: dict) -> None:
             return
         _remember_output(job)
         located = job.get("output_path")
-        if isinstance(located, str) and _is_partial_name(os.path.basename(located)):
-            if not job.get("error"):
-                job["error"] = (
-                    "Partial recording was left in place; no media file could be remuxed"
-                )
+        if (isinstance(located, str) and _is_partial_name(os.path.basename(located))) and not job.get("error"):
+            job["error"] = (
+                "Partial recording was left in place; no media file could be remuxed"
+            )
         return
     final = _intended_mp4(partial)
     if os.path.normcase(str(final)) == os.path.normcase(str(partial)):
@@ -1446,7 +1445,7 @@ def _media_variants(path: Path):
         yield Path(base + ".part")
         yield Path(base + ".temp")
         return
-    if name.endswith(".part") or name.endswith(".temp"):
+    if name.endswith((".part", ".temp")):
         yield path
         return
     yield Path(str(path) + ".part")
@@ -1513,7 +1512,7 @@ def _run_ffmpeg(command: list[str]):
     kwargs["text"] = True
     kwargs["encoding"] = "utf-8"
     kwargs["errors"] = "replace"
-    return subprocess.run(command, **kwargs)
+    return subprocess.run(command, check=False, **kwargs)
 
 
 def _ffmpeg_succeeded(result, final: Path) -> bool:
@@ -1548,12 +1547,12 @@ def _ffmpeg_failure_text(result) -> str:
         out = str(out)
     detail = (err or out).strip()
     if not detail:
-        return "ffmpeg remux failed (%s)" % code
+        return f"ffmpeg remux failed ({code})"
     lines = [line.strip() for line in detail.splitlines() if line.strip()]
     detail = " | ".join(lines[-4:])
     if len(detail) > 400:
         detail = detail[-400:]
-    return "ffmpeg remux failed (%s): %s" % (code, detail)
+    return f"ffmpeg remux failed ({code}): {detail}"
 
 
 def _looks_like_mpegts(path: Path) -> bool:
@@ -1605,7 +1604,7 @@ def _is_partial_name(name: str) -> bool:
 
 def _is_media_partial(path: Path) -> bool:
     name = path.name.casefold()
-    return name.endswith(".part") or name.endswith(".temp")
+    return name.endswith((".part", ".temp"))
 
 
 def _strip_partial_suffix(name: str) -> str:
@@ -1669,7 +1668,7 @@ def _started_timestamp(value) -> float | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return parsed.timestamp()
 
 

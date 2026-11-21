@@ -7,7 +7,7 @@ name = "livegrab"
 version = "0.1.2"
 description = "Localhost HTTP app that records a livestream with yt-dlp. Node.js, yt-dlp, and ffmpeg stay external programs and are not Python package dependencies."
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.14"
 dependencies = []
 
 [project.scripts]

@@ -15,7 +15,7 @@ import tempfile
 import time
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -81,7 +81,7 @@ def _job(destination: Path) -> dict:
             "template": "clip.mp4",
             "state": "stopped",
             "owner": "livegrab",
-            "started_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": datetime.now(UTC).isoformat(),
             "output_path": str(destination / "clip.mp4.part"),
         }
     )
@@ -350,8 +350,8 @@ class SlowSignalRemuxTests(unittest.TestCase):
                     "import signal",
                     "import sys",
                     "import time",
-                    "seed = %s" % repr(str(seed)),
-                    "marker = %s" % repr(str(marker)),
+                    f"seed = {str(seed)!r}",
+                    f"marker = {str(marker)!r}",
                     "output = None",
                     "prev = None",
                     "for arg in sys.argv[1:]:",
@@ -377,7 +377,7 @@ class SlowSignalRemuxTests(unittest.TestCase):
                     "    os._exit(0)",
                     "signal.signal(signal.SIGINT, on_int)",
                     "signal.signal(signal.SIGTERM, on_int)",
-                    "sys.stdout.write(%s + '\\n')" % repr(LIVE_LINE),
+                    f"sys.stdout.write({LIVE_LINE!r} + '\\n')",
                     "sys.stdout.flush()",
                     "while True:",
                     "    time.sleep(0.2)",
@@ -387,7 +387,7 @@ class SlowSignalRemuxTests(unittest.TestCase):
             fake.write_text(script, encoding="utf-8")
             fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
             manager = JobManager(str(root / "jobs.json"))
-            url = "https://example.invalid/livegrab-remux-%s" % uuid.uuid4().hex
+            url = f"https://example.invalid/livegrab-remux-{uuid.uuid4().hex}"
             try:
                 started = manager.start_job(
                     url,

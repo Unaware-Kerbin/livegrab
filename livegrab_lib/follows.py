@@ -17,7 +17,7 @@ import subprocess
 import sys
 import tempfile
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import parse_qs, urlsplit
 
 from livegrab_lib.config import load_config
@@ -87,7 +87,7 @@ def parse_twitch_login(channel) -> str:
     YouTube and any other host are rejected. The login is stored lowercase.
     """
     if not isinstance(channel, str):
-        raise ValueError("channel is required")
+        raise TypeError("channel is required")
     text = channel.strip()
     if not text:
         raise ValueError("channel is required")
@@ -114,9 +114,7 @@ def should_start_grab(follow, probe) -> bool:
     video_id = _probe_video_id(probe)
     if not video_id:
         return False
-    if video_id == follow.get("last_started_id"):
-        return False
-    return True
+    return video_id != follow.get("last_started_id")
 
 
 def check_follows(follows, probe, start=None, active=None):
@@ -129,7 +127,7 @@ def check_follows(follows, probe, start=None, active=None):
     previous live status, title, and video id.
     """
     if not isinstance(follows, list):
-        raise ValueError("follows must be a list")
+        raise TypeError("follows must be a list")
     checked = []
     for item in follows:
         if not isinstance(item, dict):
@@ -179,11 +177,11 @@ def probe_channel(login: str, timeout: float = 60) -> dict:
         }
         run_kwargs.update(subprocess_kwargs())
         run_kwargs["shell"] = False
-        completed = subprocess.run(args, **run_kwargs)
+        completed = subprocess.run(args, check=False, **run_kwargs)
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "live check timed out"}
     except OSError as exc:
-        return {"ok": False, "error": "live check failed: %s" % exc}
+        return {"ok": False, "error": f"live check failed: {exc}"}
     finally:
         _remove_tree(directory)
     return _probe_from_process(completed.returncode, completed.stdout or "", completed.stderr or "")
@@ -222,7 +220,7 @@ class FollowStore:
 
     def set_enabled(self, login: str, enabled) -> dict:
         if not isinstance(enabled, bool):
-            raise ValueError("enabled must be a boolean")
+            raise TypeError("enabled must be a boolean")
         key = _lookup_key(login)
         with self._lock:
             item = self._find_locked(key)
@@ -370,8 +368,8 @@ class FollowChecker:
         while not self._stop.is_set():
             try:
                 self.check_once()
-            except Exception as exc:
-                sys.stderr.write("livegrab: follow check failed: %s\n" % exc)
+            except Exception as exc: # noqa
+                sys.stderr.write(f"livegrab: follow check failed: {exc}\n")
             if self._stop.wait(self.interval_seconds):
                 return
 
@@ -406,7 +404,7 @@ class FollowChecker:
             return False
         if job.get("state") == "error":
             raise FollowError(job.get("error") or "could not start grab")
-        sys.stderr.write("livegrab: auto-started %s (%s)\n" % (url, video_id or ""))
+        sys.stderr.write("livegrab: auto-started {} ({})\n".format(url, video_id or ""))
         return True
 
     def _grab_active(self, url, video_id) -> bool:
@@ -437,7 +435,7 @@ def _check_one(follow, probe, start, active) -> dict:
         return follow
     try:
         probed = probe(login)
-    except Exception as exc:
+    except Exception as exc: # noqa
         probed = {"ok": False, "error": str(exc)}
     if _probe_failed(probed):
         follow["error"] = _error_text(probed)
@@ -457,7 +455,7 @@ def _check_one(follow, probe, start, active) -> dict:
             return follow
         if start is not None and start(follow, probed):
             follow["last_started_id"] = video_id
-    except Exception as exc:
+    except Exception as exc: # noqa
         follow["error"] = _short(exc)
     return follow
 
@@ -629,7 +627,7 @@ def _probe_from_process(returncode: int, stdout: str, stderr: str) -> dict:
     payload = _parse_json(stdout)
     if isinstance(payload, dict):
         return _probe_from_json(payload)
-    combined = "%s\n%s" % (stderr, stdout)
+    combined = f"{stderr}\n{stdout}"
     if _text_says_offline(combined):
         return {
             "ok": True,
@@ -640,7 +638,7 @@ def _probe_from_process(returncode: int, stdout: str, stderr: str) -> dict:
         }
     message = _last_error_line(stderr) or _last_error_line(stdout)
     if not message:
-        message = "yt-dlp exited with status %s" % returncode
+        message = f"yt-dlp exited with status {returncode}"
     return {"ok": False, "error": message}
 
 
@@ -730,7 +728,7 @@ def _last_error_line(text: str) -> str | None:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _remove_tree(directory: str) -> None:

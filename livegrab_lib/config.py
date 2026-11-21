@@ -64,7 +64,7 @@ def _require_destination(destination) -> str:
     path. Any other non-empty path the user typed is valid too.
     """
     if not isinstance(destination, str):
-        raise ValueError("destination must be a non-empty string")
+        raise TypeError("destination must be a non-empty string")
     text = destination.strip()
     if not text:
         raise ValueError("Choose a folder before starting")
@@ -149,7 +149,7 @@ def save_config(config: dict) -> dict:
 def update_config(updates: dict) -> dict:
     """Apply a partial settings update and return the API view."""
     if not isinstance(updates, dict):
-        raise ValueError("config must be a JSON object")
+        raise TypeError("config must be a JSON object")
     config = load_config()
     if "destination" in updates:
         config["destination"] = updates["destination"]

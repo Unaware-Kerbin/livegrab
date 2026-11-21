@@ -32,7 +32,7 @@ class ProductionSourceTests(unittest.TestCase):
                 text = handle.read()
             for token in BANNED:
                 if token in text:
-                    hits.append("%s contains %r" % (path, token))
+                    hits.append(f"{path} contains {token!r}")
         self.assertEqual(hits, [], "\n".join(hits))
 
 

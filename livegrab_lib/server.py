@@ -101,13 +101,13 @@ class LivegrabHandler(BaseHTTPRequestHandler):
     follows: FollowChecker | None = None
     project_root = PROJECT_ROOT
 
-    def log_message(self, fmt, *args):
-        sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
+    def log_message(self, format, *args):
+        sys.stderr.write(f"{self.address_string()} - {format % args}\n")
 
     def do_GET(self):
         try:
             self._handle_get()
-        except Exception:
+        except Exception: # noqa
             self._send_json(500, {"error": "internal error"})
 
     def do_POST(self):
@@ -119,9 +119,7 @@ class LivegrabHandler(BaseHTTPRequestHandler):
             self._send_json(exc.status, {"error": str(exc)})
         except ValueError as exc:
             self._send_json(400, {"error": str(exc)})
-        except json.JSONDecodeError:
-            self._send_json(400, {"error": "invalid JSON"})
-        except Exception:
+        except Exception: # noqa
             self._send_json(500, {"error": "internal error"})
 
     def do_DELETE(self):
@@ -131,7 +129,7 @@ class LivegrabHandler(BaseHTTPRequestHandler):
             self._send_json(exc.status, {"error": str(exc)})
         except ValueError as exc:
             self._send_json(400, {"error": str(exc)})
-        except Exception:
+        except Exception: # noqa
             self._send_json(500, {"error": "internal error"})
 
     def _handle_get(self):
@@ -294,7 +292,7 @@ class LivegrabHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def bind_server(host: str = HOST, ports=PORTS):
+def bind_server(host:str= HOST, ports:tuple[int]=PORTS):
     if host != HOST or tuple(ports) != (8765,):
         raise RuntimeError("Livegrab binds to 127.0.0.1:8765 only")
     last_error = None
@@ -311,11 +309,12 @@ def main() -> int:
     follows = FollowChecker(manager)
     LivegrabHandler.manager = manager
     LivegrabHandler.follows = follows
-    httpd, port = bind_server()
+    ports = (int(os.getenv("PORT", PORTS[0])),)
+    httpd, port = bind_server(ports=ports)
     follows.start()
     print(f"Livegrab listening on http://127.0.0.1:{port}", flush=True)
     print(
-        "Livegrab tools yt-dlp=%s ffmpeg=%s" % (ytdlp_path(), ffmpeg_path() or ""),
+        f"Livegrab tools yt-dlp={ytdlp_path()} ffmpeg={ffmpeg_path()}",
         flush=True,
     )
     try:

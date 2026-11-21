@@ -229,10 +229,10 @@ class ServerExitTests(unittest.TestCase):
                     err = stderr_path.read_text(encoding="utf-8", errors="replace")
                     if code is not None and "could not bind" in err:
                         self.skipTest("127.0.0.1:8765 was taken before Livegrab bound it")
-                    self.fail("server did not listen (exit %s): %s" % (code, err))
+                    self.fail(f"server did not listen (exit {code}): {err}")
                 started = time.monotonic()
                 request = urllib.request.Request(
-                    "http://%s:%s/api/shutdown" % (HOST, PORT),
+                    f"http://{HOST}:{PORT}/api/shutdown",
                     data=b"",
                     method="POST",
                     headers={"Content-Length": "0"},

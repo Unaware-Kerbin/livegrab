@@ -232,7 +232,7 @@ class FakeManager:
             }
         )
         job = {
-            "id": "job-%d" % len(self.calls),
+            "id": f"job-{len(self.calls)}",
             "url": url,
             "state": "starting",
             "owner": "livegrab",

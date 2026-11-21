@@ -44,10 +44,12 @@ class ConfigDirTests(unittest.TestCase):
 
     def test_linux_uses_home_config_without_xdg(self):
         home = "/tmp/livegrab-home"
-        with mock.patch("livegrab_lib.platform.sys.platform", "linux"):
-            with mock.patch.dict(os.environ, {"HOME": home}, clear=False):
-                os.environ.pop("XDG_CONFIG_HOME", None)
-                result = config_dir()
+        with (
+            mock.patch("livegrab_lib.platform.sys.platform", "linux"),
+            mock.patch.dict(os.environ, {"HOME": home}, clear=False)
+        ):
+            os.environ.pop("XDG_CONFIG_HOME", None)
+            result = config_dir()
         self.assertEqual(Path(result), Path(home) / ".config" / "livegrab")
 
 

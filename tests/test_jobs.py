@@ -74,14 +74,13 @@ class FolderCreateTests(unittest.TestCase):
             with mock.patch(
                 "livegrab_lib.jobs.subprocess.Popen",
                 side_effect=AssertionError("yt-dlp was started"),
-            ):
-                with self.assertRaises(JobError) as caught:
-                    manager.start_job(
-                        "https://example.invalid/livegrab-not-a-stream",
-                        destination=destination,
-                        template="%(id)s.%(ext)s",
-                        audio_source="live",
-                    )
+            ), self.assertRaises(JobError) as caught:
+                manager.start_job(
+                    "https://example.invalid/livegrab-not-a-stream",
+                    destination=destination,
+                    template="%(id)s.%(ext)s",
+                    audio_source="live",
+                )
         self.assertEqual(caught.exception.status, 400)
         self.assertEqual(str(caught.exception), "Could not create that folder")
 

@@ -8,12 +8,12 @@ file, and hide every console it would spawn. Nothing here is a livestream.
 import os
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest import mock
 
 from livegrab_lib.jobs import (
-    JobManager,
     _WINDOWS_STOP_GRACE,
+    JobManager,
     _blank_job,
     _popen_kwargs,
     _signal_spawned,
@@ -35,7 +35,7 @@ def _free_pair():
     parent = 250001
     while parent < 260000:
         child = parent + 1
-        if not os.path.exists("/proc/%s" % parent) and not os.path.exists("/proc/%s" % child):
+        if not os.path.exists(f"/proc/{parent}") and not os.path.exists(f"/proc/{child}"):
             return parent, child
         parent += 2
     raise RuntimeError("no unused pids")
@@ -109,7 +109,7 @@ class WindowsTreeStopTests(unittest.TestCase):
                     "pid": parent,
                     "audio_source": "live",
                     "live_from_start": False,
-                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "started_at": datetime.now(UTC).isoformat(),
                 }
             )
             manager._jobs.append(job)
@@ -167,9 +167,9 @@ class WindowsTreeStopTests(unittest.TestCase):
             mock.patch("livegrab_lib.jobs.sys.platform", "win32"),
             mock.patch("livegrab_lib.jobs.subprocess.run", side_effect=lambda *args, **kwargs: calls.append(args)),
             mock.patch("livegrab_lib.jobs.os.kill", side_effect=AssertionError("signaled")),
+            self.assertRaises(PermissionError),
         ):
-            with self.assertRaises(PermissionError):
-                _signal_spawned(149396)
+            _signal_spawned(149396)
         self.assertEqual(calls, [])
 
 

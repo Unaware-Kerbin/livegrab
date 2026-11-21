@@ -17,9 +17,9 @@ import uuid
 from pathlib import Path
 
 from livegrab_lib.jobs import (
-    JobManager,
     _POSIX_STOP_GRACE,
     _POSIX_STOP_KILL_WAIT,
+    JobManager,
     _popen_kwargs,
     pid_alive,
 )
@@ -127,31 +127,7 @@ class LinuxStopTests(unittest.TestCase):
             ready = root / "child.pid"
             hold = root / "hold.py"
             hold.write_text(
-                "\n".join(
-                    [
-                        "import os",
-                        "import signal",
-                        "import sys",
-                        "import time",
-                        "marker, ready = sys.argv[1], sys.argv[2]",
-                        "def note(signum, frame):",
-                        "    handle = open(marker, 'a', encoding='utf-8')",
-                        "    handle.write('child %s\\n' % signum)",
-                        "    handle.flush()",
-                        "    os.fsync(handle.fileno())",
-                        "    handle.close()",
-                        "signal.signal(signal.SIGINT, note)",
-                        "signal.signal(signal.SIGTERM, note)",
-                        "handle = open(ready, 'w', encoding='utf-8')",
-                        "handle.write(str(os.getpid()))",
-                        "handle.flush()",
-                        "os.fsync(handle.fileno())",
-                        "handle.close()",
-                        "while True:",
-                        "    time.sleep(0.2)",
-                        "",
-                    ]
-                ),
+                "import os\nimport signal\nimport sys\nimport time\nmarker, ready = sys.argv[1], sys.argv[2]\ndef note(signum, frame):\n    handle = open(marker, 'a', encoding='utf-8')\n    handle.write('child %s\\n' % signum)\n    handle.flush()\n    os.fsync(handle.fileno())\n    handle.close()\nsignal.signal(signal.SIGINT, note)\nsignal.signal(signal.SIGTERM, note)\nhandle = open(ready, 'w', encoding='utf-8')\nhandle.write(str(os.getpid()))\nhandle.flush()\nos.fsync(handle.fileno())\nhandle.close()\nwhile True:\n    time.sleep(0.2)\n",
                 encoding="utf-8",
             )
             fake = root / "yt-dlp"
@@ -166,10 +142,10 @@ class LinuxStopTests(unittest.TestCase):
                     "  fi",
                     "  prev=$arg",
                     "done",
-                    "marker=%s" % shlex.quote(str(marker)),
-                    "ready=%s" % shlex.quote(str(ready)),
-                    "hold=%s" % shlex.quote(str(hold)),
-                    "python=%s" % shlex.quote(os.path.realpath(sys_executable())),
+                    f"marker={shlex.quote(str(marker))}",
+                    f"ready={shlex.quote(str(ready))}",
+                    f"hold={shlex.quote(str(hold))}",
+                    f"python={shlex.quote(os.path.realpath(sys_executable()))}",
                     "trap 'echo shell INT >> \"$marker.shell\"' INT",
                     "trap 'echo shell TERM >> \"$marker.shell\"' TERM",
                     '"$python" "$hold" "$marker" "$ready" &',
@@ -177,9 +153,8 @@ class LinuxStopTests(unittest.TestCase):
                     "  sleep 0.05",
                     "done",
                     'part="${output}.part"',
-                    "printf '%s' %s > \"$part\""
-                    % (PARTIAL.decode("ascii"), shlex.quote(PARTIAL.decode("ascii"))),
-                    "echo %s" % shlex.quote(LIVE_LINE),
+                    "printf '{}' {} > \"$part\"".format(PARTIAL.decode("ascii"), shlex.quote(PARTIAL.decode("ascii"))),
+                    f"echo {shlex.quote(LIVE_LINE)}",
                     "while true; do",
                     "  sleep 0.2",
                     "done",
@@ -189,7 +164,7 @@ class LinuxStopTests(unittest.TestCase):
             fake.write_text(script, encoding="utf-8")
             fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
             manager = JobManager(str(root / "jobs.json"))
-            url = "https://example.invalid/livegrab-linux-stop-%s" % uuid.uuid4().hex
+            url = f"https://example.invalid/livegrab-linux-stop-{uuid.uuid4().hex}"
             try:
                 started = manager.start_job(
                     url,
@@ -257,7 +232,7 @@ class LinuxStopTests(unittest.TestCase):
                     shell_note = shell_path.read_text(encoding="utf-8")
                 self.assertTrue(
                     "child 2" in noted or "shell INT" in shell_note,
-                    msg="signals=%r shell=%r" % (noted, shell_note),
+                    msg=f"signals={noted!r} shell={shell_note!r}",
                 )
                 time.sleep(0.3)
                 listed = manager.list_jobs()

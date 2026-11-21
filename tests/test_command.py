@@ -48,7 +48,7 @@ class BuildArgsTests(unittest.TestCase):
     def assert_no_javascript_runtime(self, args):
         blob = "\n".join(str(part) for part in args)
         for token in JS_RUNTIME_TOKENS:
-            self.assertNotIn(token, blob, msg="%r found in %s" % (token, args))
+            self.assertNotIn(token, blob, msg=f"{token!r} found in {args}")
 
     def test_starts_with_ytdlp_newline_and_no_update(self):
         args = call_build_args(False)
