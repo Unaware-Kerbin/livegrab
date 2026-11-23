@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from livegrab_lib.config import config_view, update_config
+from livegrab_lib.config import config_view, normalize_audio_source, update_config
 from livegrab_lib.follows import FollowChecker, FollowError
 from livegrab_lib.jobs import RUNNING_STATES, JobError, JobManager
 from livegrab_lib.platform import ffmpeg_path, ytdlp_path
@@ -191,7 +191,16 @@ class LivegrabHandler(BaseHTTPRequestHandler):
             payload = self._read_json()
             if not isinstance(payload, dict):
                 raise ValueError("follow must be a JSON object")
-            self._send_json(200, self.follows.add(payload.get("channel")))
+            destination = payload.get("destination") if "destination" in payload else None
+            audio_source = payload.get("audio_source") if "audio_source" in payload else None
+            self._send_json(
+                200,
+                self.follows.add(
+                    payload.get("channel"),
+                    destination=destination,
+                    audio_source=audio_source,
+                ),
+            )
             return
         if path == "/api/follows/check":
             self._require_follows()
@@ -201,9 +210,27 @@ class LivegrabHandler(BaseHTTPRequestHandler):
             self._require_follows()
             login = self._follow_login(path)
             payload = self._read_json()
-            if not isinstance(payload, dict) or "enabled" not in payload:
+            if not isinstance(payload, dict):
+                raise ValueError("follow must be a JSON object")
+            has_enabled = "enabled" in payload
+            has_destination = "destination" in payload
+            has_audio = "audio_source" in payload
+            if not has_enabled and not has_destination and not has_audio:
                 raise ValueError("enabled must be a boolean")
-            self._send_json(200, self.follows.set_enabled(login, payload.get("enabled")))
+            if has_enabled and not isinstance(payload.get("enabled"), bool):
+                raise ValueError("enabled must be a boolean")
+            if has_destination and not isinstance(payload.get("destination"), str):
+                raise ValueError("destination must be a string")
+            if has_audio:
+                normalize_audio_source(payload.get("audio_source"))
+            view = None
+            if has_enabled:
+                view = self.follows.set_enabled(login, payload.get("enabled"))
+            if has_destination:
+                view = self.follows.set_destination(login, payload.get("destination"))
+            if has_audio:
+                view = self.follows.set_audio_source(login, payload.get("audio_source"))
+            self._send_json(200, view)
             return
         self._send_json(404, {"error": "not found"})
 

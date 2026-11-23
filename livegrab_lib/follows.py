@@ -4,8 +4,11 @@ The checker reads metadata with yt-dlp --no-download. It never passes
 --live-from-start on that check, and it never starts a grab itself.
 A grab starts only through JobManager.start_job when the decision function
 says the channel just went live on a video id that has not been started.
-That call always uses live player audio (audio_source "live"), which omits
---live-from-start, even when the saved audio choice is rewind.
+That call passes the audio_source stored on the follow. "live" is live
+player audio and omits --live-from-start. "rewind" passes --live-from-start.
+A missing or unknown audio_source is treated as "live".
+Each follow can store its own destination folder. An empty destination
+uses the global folder from config. This module does not create that folder.
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ import threading
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlsplit
 
-from livegrab_lib.config import load_config
+from livegrab_lib.config import AUDIO_SOURCES, load_config, normalize_audio_source
 from livegrab_lib.jobs import ACTIVE_STATES, JobError, pid_alive
 from livegrab_lib.platform import config_dir, subprocess_kwargs, ytdlp_path
 
@@ -61,7 +64,7 @@ _STATUS_FIELDS = (
     "last_started_id",
     "error",
 )
-_PUBLIC_FIELDS = ("login", "url", "enabled") + _STATUS_FIELDS
+_PUBLIC_FIELDS = ("login", "url", "enabled", "destination", "audio_source") + _STATUS_FIELDS
 _OFFLINE_MARKERS = (
     "not currently live",
     "is offline",
@@ -211,12 +214,18 @@ class FollowStore:
             item = self._find_locked(key)
             return dict(item) if item else None
 
-    def add(self, channel) -> dict:
+    def add(self, channel, destination=None, audio_source=None) -> dict:
         login = parse_twitch_login(channel)
+        folder = "" if destination is None else _require_destination_text(destination)
+        source = None if audio_source is None else normalize_audio_source(audio_source)
         with self._lock:
             if self._find_locked(login) is not None:
                 raise ValueError("that channel is already followed")
-            self._follows.append(_blank(login))
+            follow = _blank(login)
+            follow["destination"] = folder
+            if source is not None:
+                follow["audio_source"] = source
+            self._follows.append(follow)
             self._save_locked()
             return self._view_locked()
 
@@ -229,6 +238,28 @@ class FollowStore:
             if item is None:
                 raise FollowError("follow not found", 404)
             item["enabled"] = enabled
+            self._save_locked()
+            return self._view_locked()
+
+    def set_destination(self, login: str, destination) -> dict:
+        folder = _require_destination_text(destination)
+        key = _lookup_key(login)
+        with self._lock:
+            item = self._find_locked(key)
+            if item is None:
+                raise FollowError("follow not found", 404)
+            item["destination"] = folder
+            self._save_locked()
+            return self._view_locked()
+
+    def set_audio_source(self, login: str, audio_source) -> dict:
+        source = normalize_audio_source(audio_source)
+        key = _lookup_key(login)
+        with self._lock:
+            item = self._find_locked(key)
+            if item is None:
+                raise FollowError("follow not found", 404)
+            item["audio_source"] = source
             self._save_locked()
             return self._view_locked()
 
@@ -245,8 +276,9 @@ class FollowStore:
     def merge_status(self, updated: list[dict]) -> None:
         """Copy check results onto follows that are still stored.
 
-        Enabled flags, new follows, and deletions made during the probe are
-        left as they are. Missing follows are not recreated.
+        Enabled flags, destinations, audio choices, new follows, and
+        deletions made during the probe are left as they are. Missing
+        follows are not recreated.
         """
         by_login = {}
         for item in updated:
@@ -343,11 +375,17 @@ class FollowChecker:
     def view(self) -> dict:
         return self.store.view()
 
-    def add(self, channel) -> dict:
-        return self.store.add(channel)
+    def add(self, channel, destination=None, audio_source=None) -> dict:
+        return self.store.add(channel, destination=destination, audio_source=audio_source)
 
     def set_enabled(self, login: str, enabled) -> dict:
         return self.store.set_enabled(login, enabled)
+
+    def set_destination(self, login: str, destination) -> dict:
+        return self.store.set_destination(login, destination)
+
+    def set_audio_source(self, login: str, audio_source) -> dict:
+        return self.store.set_audio_source(login, audio_source)
 
     def remove(self, login: str) -> dict:
         return self.store.remove(login)
@@ -387,14 +425,21 @@ class FollowChecker:
         if self._grab_active(url, video_id):
             return False
         config = load_config()
+        # A blank per-channel folder keeps the global destination. start_job
+        # reports "Choose a folder before starting" when that is blank too.
+        chosen = _follow_destination(current)
+        if not chosen:
+            fallback = config.get("destination")
+            chosen = fallback if isinstance(fallback, str) else ""
+        source = _follow_audio_source(current)
         before = {job.get("id") for job in self._jobs()}
         try:
             job = self.manager.start_job(
                 url,
-                destination=config["destination"],
+                destination=chosen,
                 template=config["template"],
-                audio_source="live",
-                live_from_start=False,
+                audio_source=source,
+                live_from_start=source == "rewind",
             )
         except JobError as exc:
             raise FollowError(str(exc)) from exc
@@ -556,6 +601,8 @@ def _blank(login: str) -> dict:
         "login": login,
         "url": channel_url(login),
         "enabled": True,
+        "destination": "",
+        "audio_source": "live",
         "live_status": None,
         "title": None,
         "video_id": None,
@@ -573,6 +620,10 @@ def _public(item: dict) -> dict:
         elif key == "url":
             login = item.get("login")
             view[key] = item.get("url") or (channel_url(login) if isinstance(login, str) else None)
+        elif key == "destination":
+            view[key] = _follow_destination(item)
+        elif key == "audio_source":
+            view[key] = _follow_audio_source(item)
         else:
             view[key] = item.get(key)
     return view
@@ -586,6 +637,8 @@ def _normalize(item) -> dict | None:
         return None
     follow = _blank(login.lower())
     follow["enabled"] = item.get("enabled") is not False
+    follow["destination"] = _follow_destination(item)
+    follow["audio_source"] = _follow_audio_source(item)
     for key in _STATUS_FIELDS:
         if key in item:
             follow[key] = item.get(key)
@@ -596,6 +649,34 @@ def _normalize(item) -> dict | None:
         if value is not None and not isinstance(value, str):
             follow[key] = None
     return follow
+
+
+def _follow_audio_source(follow) -> str:
+    """Return ``live`` or ``rewind``. Missing and unknown values are ``live``."""
+    if not isinstance(follow, dict):
+        return "live"
+    source = follow.get("audio_source")
+    if isinstance(source, str):
+        choice = source.strip().lower()
+        if choice in AUDIO_SOURCES:
+            return choice
+    return "live"
+
+
+def _follow_destination(follow) -> str:
+    """Return a per-channel folder, or "" when the follow does not set one."""
+    if not isinstance(follow, dict):
+        return ""
+    destination = follow.get("destination")
+    if not isinstance(destination, str):
+        return ""
+    return destination.strip()
+
+
+def _require_destination_text(destination) -> str:
+    if not isinstance(destination, str):
+        raise ValueError("destination must be a string")
+    return destination.strip()
 
 
 def _lookup_key(login: str) -> str:

@@ -591,6 +591,7 @@
   }
 
   function renderFollows(follows) {
+    var editing = focusedFollowDestination();
     if (!follows.length) {
       var empty = document.createElement("p");
       empty.className = "empty";
@@ -603,6 +604,80 @@
       fragment.appendChild(renderFollow(follow));
     });
     followsEl.replaceChildren(fragment);
+    restoreFollowDestination(editing);
+  }
+
+  function focusedFollowDestination() {
+    var active = document.activeElement;
+    if (!active || !active.classList || !active.classList.contains("follow-destination")) return null;
+    return {
+      login: active.getAttribute("data-login") || "",
+      value: active.value,
+      start: active.selectionStart,
+      end: active.selectionEnd
+    };
+  }
+
+  function restoreFollowDestination(editing) {
+    if (!editing || !editing.login) return;
+    var inputs = followsEl.querySelectorAll("input.follow-destination");
+    var i;
+    for (i = 0; i < inputs.length; i++) {
+      if (inputs[i].getAttribute("data-login") !== editing.login) continue;
+      inputs[i].value = editing.value;
+      inputs[i].focus();
+      if (typeof editing.start === "number" && typeof editing.end === "number") {
+        inputs[i].setSelectionRange(editing.start, editing.end);
+      }
+      return;
+    }
+  }
+
+  function followAudioSource(follow) {
+    var source = follow && known(follow.audio_source) ? String(follow.audio_source).trim().toLowerCase() : "";
+    return AUDIO_HELP[source] ? source : "live";
+  }
+
+  function renderFollowAudio(follow) {
+    var login = known(follow.login) ? String(follow.login) : "channel";
+    var source = followAudioSource(follow);
+    var group = document.createElement("fieldset");
+    group.className = "follow-audio";
+
+    var legend = document.createElement("legend");
+    legend.textContent = "Audio";
+
+    var sources = document.createElement("div");
+    sources.className = "sources";
+    sources.setAttribute("role", "radiogroup");
+    sources.setAttribute("aria-label", "Audio for " + login);
+
+    ["live", "rewind"].forEach(function (value) {
+      var id = "follow-audio-" + value + "-" + login;
+      var label = document.createElement("label");
+      label.className = "source";
+      label.htmlFor = id;
+      var input = document.createElement("input");
+      input.id = id;
+      input.type = "radio";
+      input.name = "follow_audio_" + login;
+      input.value = value;
+      input.checked = source === value;
+      var text = document.createElement("span");
+      text.textContent = AUDIO_LABELS[value];
+      input.addEventListener("change", function () {
+        if (!input.checked) return;
+        setFollowAudio(follow.login, value, sources, source);
+      });
+      label.append(input, text);
+      sources.appendChild(label);
+    });
+
+    var help = document.createElement("p");
+    help.className = "hint";
+    help.textContent = AUDIO_HELP[source];
+    group.append(legend, sources, help);
+    return group;
   }
 
   function renderFollow(follow) {
@@ -639,7 +714,40 @@
       removeFollow(follow.login, remove);
     });
 
-    row.append(login, status, enabledLabel, remove);
+    var folder = document.createElement("div");
+    folder.className = "follow-folder";
+    var folderLabel = document.createElement("label");
+    var folderId = "follow-folder-" + (known(follow.login) ? String(follow.login) : "channel");
+    folderLabel.htmlFor = folderId;
+    folderLabel.textContent = "Folder";
+    var folderInput = document.createElement("input");
+    folderInput.id = folderId;
+    folderInput.className = "follow-destination";
+    folderInput.type = "text";
+    folderInput.name = "destination";
+    folderInput.autocomplete = "off";
+    folderInput.spellcheck = false;
+    folderInput.placeholder = "Folder for this channel (optional)";
+    folderInput.value = known(follow.destination) ? String(follow.destination) : "";
+    if (known(follow.login)) folderInput.setAttribute("data-login", String(follow.login));
+    var saveFolder = document.createElement("button");
+    saveFolder.type = "button";
+    saveFolder.className = "save-folder";
+    saveFolder.textContent = "Save";
+    if (known(follow.login)) {
+      saveFolder.setAttribute("aria-label", "Save folder for " + String(follow.login));
+    }
+    saveFolder.addEventListener("click", function () {
+      setFollowDestination(follow.login, folderInput.value, saveFolder);
+    });
+    folderInput.addEventListener("keydown", function (event) {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      setFollowDestination(follow.login, folderInput.value, saveFolder);
+    });
+    folder.append(folderLabel, folderInput, saveFolder);
+
+    row.append(login, status, enabledLabel, remove, renderFollowAudio(follow), folder);
     if (known(follow.error)) {
       var error = document.createElement("p");
       error.className = "error";
@@ -672,6 +780,65 @@
       setFollowStatus("Could not update that channel.", "error");
       toggle.checked = !enabled;
       toggle.disabled = false;
+    }
+  }
+
+  function restoreFollowAudio(radios, previous) {
+    var i;
+    for (i = 0; i < radios.length; i++) {
+      radios[i].disabled = false;
+      radios[i].checked = radios[i].value === previous;
+    }
+  }
+
+  async function setFollowAudio(login, audioSource, group, previous) {
+    if (!known(login)) return;
+    var radios = group.querySelectorAll('input[type="radio"]');
+    var i;
+    for (i = 0; i < radios.length; i++) radios[i].disabled = true;
+    try {
+      var response = await fetch("/api/follows/" + encodeURIComponent(login), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audio_source: audioSource })
+      });
+      if (!response.ok) {
+        var message = await readMessage(response);
+        setFollowStatus(message || "Could not save that audio choice.", "error");
+        restoreFollowAudio(radios, previous);
+        return;
+      }
+      var data = await response.json();
+      applyFollows(data);
+      setFollowStatus("Audio choice saved for this channel.");
+    } catch (err) {
+      setFollowStatus("Could not save that audio choice.", "error");
+      restoreFollowAudio(radios, previous);
+    }
+  }
+
+  async function setFollowDestination(login, destination, button) {
+    if (!known(login)) return;
+    button.disabled = true;
+    try {
+      var response = await fetch("/api/follows/" + encodeURIComponent(login), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ destination: destination })
+      });
+      if (!response.ok) {
+        var message = await readMessage(response);
+        setFollowStatus(message || "Could not save that folder.", "error");
+        return;
+      }
+      var data = await response.json();
+      applyFollows(data);
+      if (String(destination).trim()) setFollowStatus("Folder saved for this channel.");
+      else setFollowStatus("This channel will use the main folder.");
+    } catch (err) {
+      setFollowStatus("Could not save that folder.", "error");
+    } finally {
+      if (button.isConnected) button.disabled = false;
     }
   }
 
